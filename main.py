@@ -1,65 +1,74 @@
 #!/usr/bin/env python3
-"""BTC race bot v6: oversold bounce + Chandelier (volatility) trailing exit.
+"""BTC race bot v5: oversold bounce — deep 4-hour drawdown + 60-bar breakout.
 
 Entry for make.fun btc-race-24h-20261118-1444. Dev window: 1,440 bars,
-downtrend -2.80% ($65,083.31 -> $63,260.75) — a washout-bounce window,
-which is exactly the regime v6 was designed for.
+downtrend -2.80% ($65,083.31 -> $63,260.75) — a washout-bounce window.
+Gate check v6 on this window: +$0.00 / 0 trades (FAILED gate); v5 is
+now being gate-checked on the same window, per the v6 -> v5 -> v4
+rotation (STRATEGY.md §8/§9).
 
-Long only, one position, full size. Strategy (see STRATEGY.md §9):
+Long only, one position, full size. Strategy (see STRATEGY.md §8):
 
-  - ENTRY (validated, see §8.1/§8.3): arm only when the close is at
-    least 2% below the highest close of the last 240 bars (a genuine
-    washout, ~8x the ~26 bps round-trip cost), then enter on a close
-    above the highest close of the last 60 bars (1-hour Donchian
-    breakout, confirming the turn at the START of the recovery). v5's
-    trade 4 proved the entry: it entered the window-3 h17 bounce at
-    $63,364, only 0.3% above the breakout.
-  - EXIT (CHANGED from v5): Chandelier trailing exit — sell when the
-    close falls 3x ATR(60) below the highest close since entry. The
-    ATR is computed LIVE each bar from the last 60 one-minute bars
-    (true range), so the trail scales with the window's current
-    volatility instead of being a fixed number.
-  - NO trend-break backstop (same reason as v5): price sits BELOW
-    EMA(240) at entry by construction, so that backstop would fire
-    immediately. NO take-profit: any TP level would be fitted to the
-    data (same argument as v4 §7.3).
+  - ARM (oversold, NEW in v5): only consider longs when the close is at
+    least 2% below the highest close of the last 240 bars (4 h). The
+    decline must be an order of magnitude larger than the ~26 bps
+    round-trip cost, so the snap-back that follows has room to pay.
+    This is the INVERSE of v4's tide gate: v4 waits for the 12-hour
+    trend to turn up (and therefore never trades a downtrend day); v5
+    waits for the washout and trades the snap-back that follows it.
+  - TRIGGER (unchanged from v3/v4): close breaks above the highest
+    close of the last 60 bars (1-hour Donchian breakout). The breakout
+    confirms the turn — it fires at the START of the recovery, not 30
+    minutes into it (v1's momentum trigger) and not after a 4-hour
+    return has already turned positive (v3's gate, which opened 24
+    minutes after the window-3 bounce's breakout and filled 2.2%
+    above the breakout price).
+  - EXIT (trailing stop, unchanged from v3/v4): sell when the close
+    falls 0.3% below the highest close since entry (~the round-trip
+    cost). The trail locks the bounce's gain as it develops and cuts
+    promptly when the bounce fades.
+  - NO trend-break backstop (deliberate difference from v4): v4's
+    backstop sells when the close falls below EMA(240), but v5's entry
+    is justified by the washout low, not by a 4-hour uptrend — price
+    sits BELOW EMA(240) at entry by construction, so that backstop
+    would fire immediately. NO take-profit either: any TP level that
+    "catches" these bounces would be chosen from the data itself —
+    that is fitting, and the rule forbids it (same argument as v4 §7.3).
 
-Why the exit changes, from the diagnosis (STRATEGY.md §9.1) — the
-failure was in the exit, not the entry. v5's fixed 0.3% trail was set
-from the COST (~26 bps round trip), but window 3's 1-minute noise is
-12 bps stdev: a 30 bps pullback is only ~2.5x the noise, and in a
-random 30-bar window the median max pullback from the running peak
-is 53 bps (86% of windows pull back >= 30 bps). So the fixed trail
-fires on normal bounce chop. It cut v5's trade 4 nine bars after
-entry at +0.49% while the bounce ran on to +3.66%; the bounce's own
-largest intra-rise pullback was 47 bps. The Chandelier exit is the
-literature answer (LeBeau): place the stop 3 ATRs from the extreme,
-because a pullback of up to ~2x ATR is normal chop inside a move
-and only a move beyond ~3x ATR is a genuine reversal. At the
-window-3 bounce, 3x ATR(60) was 72 bps — wide enough to survive the
-bounce's own 47 bps chop, tight enough to exit on a real fade.
-The multiple (3x) and the window (60 bars, 1 hour — the same scale
-as the entry breakout, so the trail reads the same regime the entry
-reads) come from the literature, NOT from testing trail widths
-against the dev window: no trail width was gate-checked before this
-design was fixed.
+Why this structure, from the diagnosis (STRATEGY.md §8.1): on the
+three dev windows, every version that bought bounces INSIDE a
+downtrend lost a little per round trip (v3: -$2.32/-$10.57/-$6.34),
+while the version that waited for an uptrend never traded at all
+(v4: $0.00, 0 trades on both downtrend windows). The structural
+hole is the bounce itself: the one move a long-only bot CAN catch on
+a downtrend day. The h17 bounce of window 3 ran +5.47% from its low
+to its peak (+2.87% in one hour) — the day's single large up-move —
+and it came after a deep washout (drawdown -2.06% from the 240-bar
+high at the breakout bar). v3 missed it because its gate needed a
+positive 4-hour return first; v5 arms on the washout itself.
 
-Trade-off, stated before testing: a wider trail also lets FAILED
-bounces run longer before exiting (v5's trades 2/3, whose intra-hold
-pullbacks were 42/51 bps, would exit later and lose more than
-v5's -0.37%/-0.48%). The design bets the winner's held gain
-(a bounce ridden near its peak instead of cut at +0.49%) outweighs
-the losers' extra bleed. That is a structural bet, judged by the
-single gate check below — not by tuning the multiple.
+Measured arming frequency (diagnosis only, §8.1): the arm fires
+0-3 times per 24 h across the three windows (window 1: 0; window 2:
+1; window 3: 3) — rare, as the research requires (a few trades per
+day at most). Every fire followed a deep decline and a breakout
+confirming the turn.
 
-v6 is the only version that has ever passed the dev gate: race
-20261115-0828, +$14.35 net PnL, submitted 15 Nov 2026.
+Trade-off, stated before testing: on a window with no washout +
+breakout (like window 1), v5 takes zero trades and fails the dev
+gate the same way v4 does ($0, no bleed). v4 and v5 are
+complementary: v4 for uptrend windows, v5 for downtrend windows
+with a washout bounce. The bot only needs ONE good round trip to
+pass the dev gate.
 
-Pure function of bar closes/highs/lows, integer math only:
-deterministic, no clock, no network, no randomness, no files.
-Speaks agent-fun/bars-replay/v1 via the vendored shim
-(vendor/makefun_bars.py, byte-identical to the kit SDK).
+Pure function of bar closes, integer math only: deterministic, no
+clock, no network, no randomness, no files. Speaks
+agent-fun/bars-replay/v1 via the vendored shim (vendor/makefun_bars.py,
+byte-identical to the kit SDK).
 """
+
+# Version: v5 (oversold bounce) — gate rotation for race btc-race-24h-20261118-1444.
+# v6 gate on this window: +$0.00 / 0 trades (FAILED). v5 now under gate check.
+# Strategy parameters/logic unchanged from main-v5-oversold-bounce.py (no tuning).
 
 import os
 import sys
@@ -67,17 +76,14 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor"))
 import makefun_bars
 
-# --- Parameters (research-chosen; see STRATEGY.md §9) ------------------------
-OVERSOLD_BARS = 240     # oversold lookback: 4 h (unchanged from v5)
-OVERSOLD_DD_BPS = 200   # arm only when >= 2% below the 240-bar high
-                        # (unchanged from v5)
-BREAKOUT_BARS = 60      # entry trigger: 1-hour Donchian high (unchanged)
-ATR_BARS = 60           # volatility lookback: 1 hour of 1-min bars —
-                        # same scale as the breakout, so the trail reads
-                        # the same regime the entry reads
-ATR_MULT = 3            # Chandelier standard: 3x ATR (LeBeau). A
-                        # pullback up to ~2x ATR is normal chop inside
-                        # a move; beyond ~3x ATR is a genuine reversal.
+# --- Parameters (research-chosen; see STRATEGY.md §8) ------------------------
+OVERSOLD_BARS = 240     # oversold lookback: 4 h (4x the breakout window,
+                        # same middle scale as v3/v4's 240-min screen)
+OVERSOLD_DD_BPS = 200   # arm only when >= 2% below the 240-bar high:
+                        # ~8x the ~26 bps round-trip cost, ~1/4 of a
+                        # volatile day's range — a genuine washout, not noise
+BREAKOUT_BARS = 60      # entry trigger: 1-hour Donchian high (minutes)
+TRAIL_BPS = 30          # trailing stop: 0.3% below the peak since entry
 MAX_SLIPPAGE_BPS = 100  # 4x the expected ~26 bps cost; caps gap fills
 BPS = 10_000
 
@@ -85,30 +91,10 @@ SYMBOL = "CBBTC"
 
 # --- State ------------------------------------------------------------------
 closes = []             # close prices (ints, price_scale 5), in batch order
-highs = []              # high prices, same order
-lows = []               # low prices, same order
 entry_price = None      # fill price of the open position (int), or None
 entry_seq = -1          # seq of the batch whose fills opened the position
 peak_close = None       # highest close seen while holding (int), or None
 pending_buy = False     # a buy order is decided but not yet filled/rejected
-
-
-def atr_now(n):
-    """ATR over the last ATR_BARS bars ending at index n-1 (price units).
-
-    True range per bar = max(h-l, |h-prev_close|, |l-prev_close|).
-    Integer math only; n must be > ATR_BARS.
-    """
-    tr_sum = 0
-    for k in range(n - ATR_BARS, n):
-        h, l, pc = highs[k], lows[k], closes[k - 1]
-        tr = h - l
-        if h - pc > tr:
-            tr = h - pc
-        if pc - l > tr:
-            tr = pc - l
-        tr_sum += tr
-    return tr_sum // ATR_BARS
 
 
 def on_batch(state, batch):
@@ -134,8 +120,6 @@ def on_batch(state, batch):
         return []
     close = int(bar["c"])
     closes.append(close)
-    highs.append(int(bar["h"]))
-    lows.append(int(bar["l"]))
 
     held = state.positions.get(SYMBOL)
     n = len(closes)
@@ -144,26 +128,18 @@ def on_batch(state, batch):
     if held is not None and held.qty > 0:
         if peak_close is None or close > peak_close:
             peak_close = close
-        # Chandelier exit: sell when the close falls ATR_MULT x ATR(60)
-        # below the highest close since entry. The trail is computed
-        # live each bar, so it widens as the bounce's volatility
-        # expands and tightens as it calms. The comparison uses closes
-        # only (never the bar high): the entry trigger is a close
-        # breakout, so the exit must read the same series, or a
-        # one-minute spike high would move the trail without a close
-        # ever confirming it. No EMA backstop (price is below EMA(240)
-        # at entry by construction) and no take-profit (any TP level
-        # would be fitted to the data).
-        if n > ATR_BARS:
-            trail = ATR_MULT * atr_now(n)
-            if close < peak_close - trail:
-                return [{"side": "sell", "symbol": SYMBOL, "qty": held.qty,
-                         "max_slippage_bps": MAX_SLIPPAGE_BPS}]
+        # Trailing stop: 0.3% below the highest close since entry.
+        # No EMA backstop: price is below EMA(240) at entry by
+        # construction (deep decline), so that backstop would fire at
+        # once. No take-profit: any TP level would be fitted to the data.
+        if peak_close is not None and close * BPS < peak_close * (BPS - TRAIL_BPS):
+            return [{"side": "sell", "symbol": SYMBOL, "qty": held.qty,
+                     "max_slippage_bps": MAX_SLIPPAGE_BPS}]
         return []
 
-    # --- Entry: flat (unchanged from v5) ------------------------------------
+    # --- Entry: flat ---------------------------------------------------------
     # Need a full 240-bar oversold window (covers the 60-bar breakout
-    # window and the 60-bar ATR window too).
+    # window too).
     if pending_buy or n <= OVERSOLD_BARS:
         return []
     # Arm (oversold): close at least 2% below the highest close of the
